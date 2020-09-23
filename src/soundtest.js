@@ -36,7 +36,6 @@ const EDIT = 3;
 const MODE_NAMES = ["add", "play", "delete", "edit"];
 
 const DEFAULT_INTERVAL = 6; // INTERVAL/60秒に1回。
-const DEFAULT_UNIT_TIME = DEFAULT_INTERVAL / 60;
 const DEFAULT_ATTACK_LEVEL = 1.0;
 const DEFAULT_RELEASE_LEVEL = 0.0;
 
@@ -46,7 +45,7 @@ const DEFAULT_DECAY_TIME_RATIO = 0.95;
 const DEFAULT_SUSPERCENT = 0.0;
 const DEFAULT_RELEASE_TIME_RATIO = 0.0;
 
-const DEFAULT_UNIT_SPAN = 2; // 長さの基本単位
+const DEFAULT_UNIT_SPAN = 2; // 長さの基本単位(1, 2, 4).
 
 // 振動数配列（0～43で24が440Hzになるように設定）
 let CODE_ARRAY = [];
@@ -86,6 +85,7 @@ function setup(){
 }
 
 function draw(){
+	mySystem.update();
   mySystem.draw();
 	mySystem.play();
 }
@@ -138,7 +138,7 @@ function controlMode(y){
 	const mode = Math.floor(y / 40); // 0, 1, 2, 3.
 	mySystem.setMode(mode);
 	// modeがPLAYならPLAYにする処理、そうでないなら再生を止める処理。
-	if(mode !== PLAY){ mySystem.reset(); }
+	if(mode !== PLAY){ mySystem.stop(); mySystem.reset(); }
 }
 
 // Noteの追加準備
@@ -183,8 +183,13 @@ class BaseBoard{
 		let gr = this.board;
 		// 太い線は4つずつと3つずつを切り替えられるようにしたいかも。
 		// つまり、4が8つだと具合が悪いので・・6つにする。で、24にして、
-	  gr.background(200);
-	  gr.fill(140);
+		// #だけ160にして#でない音が目立つようにする。12で割った余りが1, 4, 6, 9, 11のとき。
+		// できた。
+		for(let k = 0; k < 44; k++){
+			if([1, 4, 6, 9, 11].includes(k % 12)){ gr.fill(160); }else{ gr.fill(200); }
+			gr.rect(0, (43 - k) * 12, 672, 12);
+		}
+	  gr.fill(120);
 	  gr.noStroke();
 	  gr.rect(0, 12 * 44, 672, 12 * 8);
   	gr.stroke(255);
@@ -294,6 +299,10 @@ class Music{
 		for(let t of this.trackArray){ t.playNote(this.properFrameCount); }
 		this.properFrameCount++;
 	}
+	drawProgressLine(interval){
+		stroke(255, 0, 0);
+		line(128 + 6 * this.properFrameCount / interval, 16, 128 + 6 * this.properFrameCount / interval, 640);
+	}
 	reset(){
 		this.properFrameCount = 0;
 		for(let t of this.trackArray){ t.reset(); }
@@ -307,15 +316,17 @@ class System{
 		this.noteVisual = new NoteBoard();
 		this.config = new ConfigBoard();
 		this.myMusic = new Music(); // Systemに持たせる感じで。
+		this.isPlaying = false; // PLAYかどうかくらいならいいでしょ。
 		this.unitSpan = DEFAULT_UNIT_SPAN; // 基本は4つ分で。1,2,4から選べるように。
 		this.editingTrack = undefined; // 編集中のトラック。トラックを追加するときにundefinedの場合最初のが登録される、あとは・・変えられるように。
+		this.interval = DEFAULT_INTERVAL;
 
-		let track2 = new Track();
+		let track2 = new Track(this.interval);
 		let envOsc2 = new EnvelopedOscillator("square"); // オシレータベースじゃないやつも作りたいねぇ。wavファイルベースの。
 		track2.setEnvOsc(envOsc2);
 		this.myMusic.addTrack(track2); // 追加する機構は後で作る。
 
-		let track3 = new Track();
+		let track3 = new Track(this.interval);
 		let envOsc3 = new EnvelopedOscillator("white");
 		track3.setEnvOsc(envOsc3);
 
@@ -325,6 +336,7 @@ class System{
 
 	}
 	setMode(mode){
+		if(mode === PLAY && this.config.getMode() !== PLAY){ this.start(); } // 「PLAYでない→PLAY」のときだけ再生する。
 		this.config.setMode(mode);
 	}
 	setInterval(newInterval){
@@ -338,11 +350,21 @@ class System{
 			case 1: this.unitSpan = 4; break;
 		}
 	}
+	start(){
+		this.isPlaying = true;
+	}
+	stop(){
+		this.isPlaying = false;
+	}
 	reset(){
 		this.myMusic.reset();
 	}
 	update(){
+		if(this.isPlaying){ return; }
 		// isPlayingがfalseのときだけ編集可能にする。そこんとこ注意。
+		if(mouseIsPressed && this.nextNoteData.left !== undefined){
+			this.setRight();
+		}
 	}
 	addNewNote(){
 		if(this.nextNoteData.left === undefined){ return; }
@@ -352,15 +374,22 @@ class System{
 		//console.log(this.editingTrack.noteArray);
 		this.noteVisual.update(this.editingTrack.noteArray);
 		this.nextNoteData = {}; // data = {}ってやるとエラーになる（this.nextNoteDataの中身は変化しない）ので注意！
+
+		// Noteを追加するたびに、myMusicにどこまで増やしていいのかを伝える。あらゆるNoteにおけるrightの最大値を取って
+		// intervalを掛ければproperFrameCountの上限が出るのでそれ+1でもって上限としそこでproperFrameCountの増加をやめる。
+		// 先にNoteを追加するか。
 	}
 	draw(){
+		clear();
 		this.base.draw();
 		this.noteVisual.draw();
 		this.config.draw();
 		// PLAYMODEのとき赤い線を走らせる。あんま余計な事したくないですね。
 		if(mouseIsPressed && this.nextNoteData.left !== undefined){
-			this.setRight();
 			this.drawBlock();
+		}
+		if(this.isPlaying){
+			this.myMusic.drawProgressLine(this.interval);
 		}
 	}
 	setRight(){
@@ -380,16 +409,11 @@ class System{
 	drawBlock(){
 		const data = this.nextNoteData;
 		fill(0, 128, 255);
-		noStroke();
+		stroke(0);
 		rect(128 + 6 * data.left, 16 + 12 * data.depth, 6 * (data.right - data.left), 12);
 	}
 	play(){
-		const currentMode = this.config.getMode();
-		switch(currentMode){
-			case PLAY:
-				this.myMusic.play();
-				break;
-		}
+		if(this.isPlaying){ this.myMusic.play(); }
 	}
 }
 
@@ -500,10 +524,10 @@ class Note{
 }
 
 class Track{
-	constructor(){
+	constructor(interval, unitTime){
 		this.noteArray = [];
-		this.interval = DEFAULT_INTERVAL;
-		this.unitTime = DEFAULT_UNIT_TIME;
+		this.interval = interval;
+		this.unitTime = interval / 60;
 		this.currentNoteCount = 0;
 		this.param = new SoundParameter();
 		this.isNoise = false;
