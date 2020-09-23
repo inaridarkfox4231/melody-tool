@@ -172,6 +172,11 @@ function prepareForAddNote(x, y){
 	// 深さ。0～43の場合は43から引いて振動数に変換する。44以上ならノイズ枠なので・・この数字はブロックを出現させるのに使う。
 	// ブロックの左端は128+left*6で上端は16+depth*12で長さは(right-left)*6って感じになる。rightの変化幅はunitSpanですね。
 	data.depth = Math.floor(y / 12);
+	// 音を鳴らす。
+  // やめた。自前で用意する。できた。初めからこうすれば・・・・まあいいや。
+	const _type = t.envOsc.getType();
+	if(data.depth < 44){ mySystem.tester[_type].freq(FREQ_ARRAY[43 - data.depth]); }
+	mySystem.tester[_type].start();
 }
 
 class BaseBoard{
@@ -321,6 +326,8 @@ class System{
 		this.editingTrack = undefined; // 編集中のトラック。トラックを追加するときにundefinedの場合最初のが登録される、あとは・・変えられるように。
 		this.interval = DEFAULT_INTERVAL;
 
+		this.createTestOscillatorSet();
+
 		let track2 = new Track(this.interval);
 		let envOsc2 = new EnvelopedOscillator("square"); // オシレータベースじゃないやつも作りたいねぇ。wavファイルベースの。
 		track2.setEnvOsc(envOsc2);
@@ -334,6 +341,16 @@ class System{
 		this.nextNoteData = {}; // 新しいNoteを作る際のデータの格納庫。indexとleftとfreqはこのときに決まる（freqはundefinedの場合もある）。
 		// マウス移動によりrightが決まり、startとsustainとして登録される感じ。
 
+	}
+	createTestOscillatorSet(){
+		this.tester = {};
+		this.tester.sine = new p5.Oscillator("sine");
+		this.tester.triangle = new p5.Oscillator("triangle");
+		this.tester.square = new p5.Oscillator("square");
+		this.tester.sawtooth = new p5.Oscillator("sawtooth");
+		this.tester.pink = new p5.Noise("pink");
+		this.tester.brown = new p5.Noise("brown");
+		this.tester.white = new p5.Noise("white");
 	}
 	setMode(mode){
 		if(mode === PLAY && this.config.getMode() !== PLAY){ this.start(); } // 「PLAYでない→PLAY」のときだけ再生する。
@@ -370,10 +387,13 @@ class System{
 		if(this.nextNoteData.left === undefined){ return; }
 		let data = this.nextNoteData;
 		let freq = (data.depth < 44 ? 43 - data.depth : undefined);
-		this.editingTrack.addNote(data.index, data.left, data.right - data.left, freq);
-		//console.log(this.editingTrack.noteArray);
-		this.noteVisual.update(this.editingTrack.noteArray);
+		let t = this.editingTrack;
+		t.addNote(data.index, data.left, data.right - data.left, freq);
+		this.noteVisual.update(t.noteArray);
 		this.nextNoteData = {}; // data = {}ってやるとエラーになる（this.nextNoteDataの中身は変化しない）ので注意！
+
+		const _type = t.envOsc.getType();
+		this.tester[_type].stop();
 
 		// Noteを追加するたびに、myMusicにどこまで増やしていいのかを伝える。あらゆるNoteにおけるrightの最大値を取って
 		// intervalを掛ければproperFrameCountの上限が出るのでそれ+1でもって上限としそこでproperFrameCountの増加をやめる。
@@ -435,6 +455,9 @@ class EnvelopedOscillator{
 			  this.osc = new p5.Noise(typeName);
 				break;
 		}
+	}
+	getType(){
+		return this.typeName;
 	}
 	setADSR(a, d, s, r){
 		this.env.setADSR(a, d, s, r);
@@ -551,8 +574,8 @@ class Track{
 	}
 	playNote(count){
 		// countはmusicから渡されるproperFrameCountの値。
+		if(this.currentNoteCount === this.noteArray.length){ return; }
 		const _note = this.noteArray[this.currentNoteCount];
-		if(!_note){ return; }
 		if(count === _note.start * this.interval){
 			if(this.currentNoteCount === 0){ this.envOsc.start(); } // オシレーターのスイッチはここで入れる感じ。
 			_note.play();
